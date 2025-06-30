@@ -1,11 +1,11 @@
 import socket
 import sys
 
-def start_client(server_ip, server_port):
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def startClient(server_ip, server_port):
+    clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
-        client_socket.connect((server_ip, server_port))
+        clientSocket.connect((server_ip, server_port))
     except socket.error as e:
         print(f"Connection failed: {e}")
         sys.exit()
@@ -15,13 +15,13 @@ def start_client(server_ip, server_port):
 
     while True:
         msg = input(">> ")
-        client_socket.send(msg.encode("utf-8"))
+        clientSocket.send(msg.encode("utf-8"))
 
         if msg.strip().lower() == "terminate":
             print("[CLIENT] Terminate command sent. Closing connection.")
             break
 
-    client_socket.close()
+    clientSocket.close()
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
@@ -30,4 +30,4 @@ if __name__ == "__main__":
 
     server_ip = sys.argv[1]
     server_port = int(sys.argv[2])
-    start_client(server_ip, server_port)
+    startClient(server_ip, server_port)
