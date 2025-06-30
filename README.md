@@ -40,9 +40,6 @@ The system follows a **Client-Server** model:
 
 ### ✅ **Version 3 (v3 - Final)** – Topic-Based Pub/Sub System
 - Adds **topic filtering**: Messages are delivered **only to subscribers of the same topic**.
-- Clients send both role and topic at the start.
-- Server maintains a topic registry using **`collections.Counter`** to track active publishers per topic.
-- If a subscriber joins a topic with **no active publishers**, they receive a `NO_TOPIC` notice.
 - Thread-safe architecture using Python’s **threading.Lock** and **ThreadPoolExecutor**.
 
 ➡️ *Robust, scalable pub/sub system with efficient topic-based routing.*
