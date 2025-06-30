@@ -1,13 +1,75 @@
 import socket
 import sys
 import signal
-import time
+import threading
+
+roles = ("PUBLISHER", "SUBSCRIBER")
+clients = {}  
+lock = threading.Lock()  # ensuring thread safe 
 
 def signal_handler(sig, frame):
     print("\n[SERVER] Signal received (Ctrl+C). Shutting down server...")
     sys.exit(0)
 
 signal.signal(signal.SIGINT, signal_handler)
+
+def handleClient(conn, address):
+    try:
+        role = conn.recv(1024).decode("utf-8").strip().upper()
+
+        if role not in roles:
+            print(f"[SERVER] Invalid role '{role}' from {address}. Closing connection.")
+            conn.send("[ERROR] Invalid role. Use PUBLISHER or SUBSCRIBER.".encode("utf-8"))
+            conn.close()
+            return
+
+        with lock:
+            clients[conn] = (role, address)
+
+        print(f"[SERVER] {role} connected from {address}.")
+
+        if role == "PUBLISHER":
+            while True:
+                data = conn.recv(1024)
+                if not data:
+                    print(f"[SERVER] Publisher {address} disconnected.")
+                    break
+
+                message = data.decode("utf-8").strip()
+                print(f"[PUBLISHER] {address}: {message}")
+
+                if message.lower() == "terminate":
+                    print(f"[SERVER] Terminate received from {address}.")
+                    break
+
+                # Send message to all subscribers
+                with lock:
+                    for c in list(clients):
+                        if clients[c][0] == "SUBSCRIBER" and c != conn:
+                            try:
+                                c.send(f"[PUBLISHER] {address}: {message}".encode("utf-8"))
+                            except:
+                                print(f"[SERVER] Subscriber {clients[c][1]} disconnected unexpectedly.")
+                                c.close()
+                                del clients[c]
+        else:
+            while True:
+                try:
+                    data = conn.recv(1024)
+                    if not data:
+                        print(f"[SERVER] Subscriber {address} disconnected.")
+                        break
+                except:
+                    break
+
+    except Exception as e:
+        print(f"[ERROR] Client {address} error: {e}")
+    finally:
+        with lock:
+            if conn in clients:
+                del clients[conn]
+        conn.close()
+        print(f"[SERVER] Connection with {address} closed.")
 
 def startServer(PORT):
     host = ''
@@ -19,52 +81,26 @@ def startServer(PORT):
         print(f"[ERROR] Failed to bind: {e}")
         sys.exit()
 
-    serverSocket.listen(3)
-    print(f"[SERVER] Listening on port {PORT}. Waiting for connections...")
+    serverSocket.listen(10)
+    print(f"[SERVER] Listening on port {PORT}...")
 
     try:
         while True:
             conn, address = serverSocket.accept()
-            print(f"[SERVER] Connection established with {address}")
-
-            while True:
-                data = conn.recv(1024)
-                if not data:
-                    break
-                message = data.decode("utf-8").strip()
-                print(f"[CLIENT]: {message}")
-
-                if message.lower() == "terminate":
-                    print("[SERVER] Termination command received. Closing connection.")
-                    break
-                    # for i in range(3, 0, -1):
-                    #     conn.sendall(f"Terminating in {i}...\n".encode("utf-8"))
-                    # break
-
-            conn.close() #close connection with the current client 
-            print(f"[SERVER] Connection with client {address} is closed.\n")
-
-            for i in range(5, 0, -1):
-                print(f"[SERVER] Next connection in {i} seconds...", end='\r')
-                time.sleep(1)
-                if(i == 1):
-                    print("\n[SERVER] Ready for the next client connection.")
-
+            thread = threading.Thread(target=handleClient, args=(conn, address))
+            thread.start()
     except KeyboardInterrupt:
         print("\n[SERVER] KeyboardInterrupt detected. Shutting down...")
-
-        
-
     finally:
         serverSocket.close()
-        print("[SERVER] Socket is  closed. Server stopped.")
-        sys.exit(0)
+        print("[SERVER] Server socket closed.")
+        sys.exit()
 
-
+# main
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("[ERROR] Usage: python server.py <PORT>\nExample: python server.py 8080")
-        sys.exit(1)
+        print("Usage: python server.py <PORT>")
+        sys.exit()
 
     PORT = int(sys.argv[1])
     startServer(PORT)
