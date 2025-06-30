@@ -1,6 +1,5 @@
 import socket
 import sys
-import threading
 
 VALID_ROLES = ("PUBLISHER", "SUBSCRIBER")
 
@@ -30,7 +29,7 @@ def startClient(server_ip, server_port, role):
         client_socket.close()
         print("[CLIENT] Disconnected.")
 
-# Handles PUBLISHER role
+#  PUBLISHER
 def handlePublisher(client_socket):
     print("[PUBLISHER] You can now send messages. Type 'terminate' to exit.")
     try:
@@ -44,7 +43,7 @@ def handlePublisher(client_socket):
     except Exception as e:
         print(f"[PUBLISHER ERROR] {e}")
 
-# Handles SUBSCRIBER role
+#  SUBSCRIBER 
 def handleSubscriber(client_socket):
     print("[SUBSCRIBER] Waiting for messages from publishers...\n")
     try:

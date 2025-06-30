@@ -2,16 +2,28 @@ import socket
 import sys
 import signal
 import threading
-
+from concurrent.futures import ThreadPoolExecutor
 roles = ("PUBLISHER", "SUBSCRIBER")
 clients = {}  
 lock = threading.Lock()  # ensuring thread safe 
+threadPoolExec=ThreadPoolExecutor(max_workers=10) #threadPool workers
 
 def signal_handler(sig, frame):
     print("\n[SERVER] Signal received (Ctrl+C). Shutting down server...")
     sys.exit(0)
 
 signal.signal(signal.SIGINT, signal_handler)
+
+def sendMessage(clientConn,message,address):
+    try:
+        clientConn.send(f"[PUBLISHER] {address}: {message}".encode("utf-8"))
+    except Exception as e:
+        print(f"[SERVER] Failed to send to subscriber {address}: {e}")
+        clientConn.close()
+        if clientConn in clients:
+            del clients[clientConn]
+
+
 
 def handleClient(conn, address):
     try:
@@ -46,12 +58,7 @@ def handleClient(conn, address):
                 with lock:
                     for c in list(clients):
                         if clients[c][0] == "SUBSCRIBER" and c != conn:
-                            try:
-                                c.send(f"[PUBLISHER] {address}: {message}".encode("utf-8"))
-                            except:
-                                print(f"[SERVER] Subscriber {clients[c][1]} disconnected unexpectedly.")
-                                c.close()
-                                del clients[c]
+                            threadPoolExec.submit(sendMessage,c,message,address)
         else:
             while True:
                 try:

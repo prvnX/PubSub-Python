@@ -1,82 +1,121 @@
 import socket
-import threading
 import sys
+import signal
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
-# Store connected clients and their roles
-clients = {}  # {conn: ("PUBLISHER" or "SUBSCRIBER", addr)}
+roles = ("PUBLISHER", "SUBSCRIBER")
+clients = {}  
+lock = threading.Lock()  # ensuring thread safe 
+threadPoolExec = ThreadPoolExecutor(max_workers=10)  # thread pool for sending messages
 
-def handle_client(conn, addr):
+def signal_handler(sig, frame):
+    print("\n[SERVER] Signal received (Ctrl+C). Shutting down server...")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+
+def sendMessage(clientConn, message, address, topic):
     try:
-        # First message from client should be its role
-        role = conn.recv(1024).decode().strip().upper()
+        clientConn.send(f"[PUBLISHER] {address} - {topic}: {message}".encode("utf-8"))
+    except Exception as e:
+        print(f"[SERVER] Failed to send to subscriber {address}: {e}")
+        clientConn.close()
+        with lock:
+            if clientConn in clients:
+                del clients[clientConn]
 
-        if role not in ("PUBLISHER", "SUBSCRIBER"):
-            conn.send("Invalid role. Use PUBLISHER or SUBSCRIBER.".encode())
+def handleClient(conn, address):
+    try:
+        # initial recieve role , topic
+        data = conn.recv(1024).decode("utf-8").strip()
+        try:
+            role, topic = data.split()
+            role = role.upper()
+            topic = topic.upper()
+        except ValueError:
+            conn.send("[ERROR] Please send role and topic separated by space.".encode("utf-8"))
             conn.close()
             return
 
-        clients[conn] = (role, addr)
-        print(f"[SERVER] {addr} connected as {role}")
+        if role not in roles:
+            print(f"[SERVER] Invalid role '{role}' from {address}. Closing connection.")
+            conn.send("[ERROR] Invalid role. Use PUBLISHER or SUBSCRIBER.".encode("utf-8"))
+            conn.close()
+            return
 
-        if role == "SUBSCRIBER":
-            while True:
-                try:
-                    # Subscribers don't send anything; just keep them alive
-                    data = conn.recv(1024)
-                    if not data:
-                        break
-                except:
-                    break
-        else:  # role == "PUBLISHER"
+        with lock:
+            clients[conn] = (role, address, topic)
+
+        print(f"[SERVER] {role} connected from {address} on topic {topic}.")
+
+        if role == "PUBLISHER":
             while True:
                 data = conn.recv(1024)
                 if not data:
+                    print(f"[SERVER] Publisher {address} disconnected.")
                     break
-                message = data.decode().strip()
-                print(f"[{role}] {addr}: {message}")
+
+                message = data.decode("utf-8").strip()
+                print(f"[PUBLISHER] {address} - {topic}: {message}")
+
                 if message.lower() == "terminate":
+                    print(f"[SERVER] Terminate received from {address}.")
                     break
-                # Send to all subscribers
-                for c in list(clients):
-                    if clients[c][0] == "SUBSCRIBER" and c != conn:
-                        try:
-                            c.send(f"[MESSAGE from {addr}]: {message}".encode())
-                        except:
-                            c.close()
-                            del clients[c]
+
+                with lock:
+                    for c in list(clients):
+                        c_role, c_addr, c_topic = clients[c]
+                        if c_role == "SUBSCRIBER" and c != conn and c_topic == topic:
+                            threadPoolExec.submit(sendMessage, c, message, address, topic)
+        else:  # SUBSCRIBER
+            while True:
+                try:
+                    data = conn.recv(1024)
+                    if not data:
+                        print(f"[SERVER] Subscriber {address} disconnected.")
+                        break
+                except:
+                    break
 
     except Exception as e:
-        print(f"[ERROR] Client {addr} error: {e}")
+        print(f"[ERROR] Client {address} error: {e}")
     finally:
-        print(f"[SERVER] {addr} disconnected.")
-        if conn in clients:
-            del clients[conn]
+        with lock:
+            if conn in clients:
+                del clients[conn]
         conn.close()
+        print(f"[SERVER] Connection with {address} closed.")
 
-
-def start_server(port):
+def startServer(PORT):
     host = ''
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
-        server_socket.bind((host, port))
+        serverSocket.bind((host, PORT))
     except socket.error as e:
-        print(f"[ERROR] Bind failed: {e}")
+        print(f"[ERROR] Failed to bind: {e}")
         sys.exit()
 
-    server_socket.listen(5)
-    print(f"[SERVER] Listening on port {port}...")
+    serverSocket.listen(10)
+    print(f"[SERVER] Listening on port {PORT}...")
 
-    while True:
-        conn, addr = server_socket.accept()
-        thread = threading.Thread(target=handle_client, args=(conn, addr))
-        thread.start()
-
+    try:
+        while True:
+            conn, address = serverSocket.accept()
+            thread = threading.Thread(target=handleClient, args=(conn, address))
+            thread.start()
+    except KeyboardInterrupt:
+        print("\n[SERVER] KeyboardInterrupt detected. Shutting down...")
+    finally:
+        serverSocket.close()
+        print("[SERVER] Server socket closed.")
+        sys.exit()
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python server.py <PORT>")
         sys.exit()
 
-    port = int(sys.argv[1])
-    start_server(port)
+    PORT = int(sys.argv[1])
+    startServer(PORT)
